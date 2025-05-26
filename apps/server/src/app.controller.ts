@@ -9,4 +9,12 @@ export class AppController {
   getHello(): string {
     return this.appService.getHello();
   }
+
+  @Get('health')
+  getHealth(): { status: string; timestamp: number } {
+    return {
+      status: 'ok',
+      timestamp: Date.now(),
+    };
+  }
 }
