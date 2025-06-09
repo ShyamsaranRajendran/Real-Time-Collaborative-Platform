@@ -55,3 +55,9 @@ export enum SocketEvents {
   CURSOR_UPDATE = 'cursor_update',
   DOCUMENT_UPDATED = 'document_updated',
 }
+
+export enum Role {
+    OWNER = 'owner',
+    EDITOR = 'editor',
+    VIEWER = 'viewer',
+}

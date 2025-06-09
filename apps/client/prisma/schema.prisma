@@ -1,0 +1,109 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// --- NextAuth.js Models ---
+model Account {
+  id                String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String  @db.ObjectId
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token     String?
+  expires_at       Int?
+  token_type       String?
+  scope            String?
+  id_token         String?
+  session_state    String?
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  sessionToken String   @unique
+  userId       String   @db.ObjectId
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expires      DateTime
+}
+
+model VerificationToken {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// --- Application Models ---
+enum Role {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+model User {
+  id              String     @id @default(auto()) @map("_id") @db.ObjectId
+  name            String?
+  email           String?    @unique
+  emailVerified   DateTime?
+  image           String?
+  role            Role       @default(VIEWER)
+  hashedPassword  String?
+  accounts        Account[]
+  sessions        Session[]
+  documents       Document[]  @relation("DocumentOwner")
+  permissions     DocumentPermission[]
+  // Add the reverse relation for collaborators
+  collaboratedDocuments DocumentsOnUsers[]
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
+model Document {
+  id              String     @id @default(auto()) @map("_id") @db.ObjectId
+  title           String
+  content         String?
+  ownerId         String     @db.ObjectId
+  owner           User       @relation("DocumentOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  permissions     DocumentPermission[]
+  // Add the reverse relation for collaborators
+  collaborators  DocumentsOnUsers[]
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
+model DocumentPermission {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String   @db.ObjectId
+  user       User     @relation(fields: [userId], references: [id])
+  documentId String   @db.ObjectId
+  document   Document @relation(fields: [documentId], references: [id])
+  permission Role
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, documentId])
+}
+
+// Join table for many-to-many collaborators
+model DocumentsOnUsers {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String   @db.ObjectId
+  user       User     @relation(fields: [userId], references: [id])
+  documentId String   @db.ObjectId
+  document   Document @relation(fields: [documentId], references: [id])
+  assignedAt DateTime @default(now())
+
+  @@unique([userId, documentId])
+  @@unique([documentId, userId])
+}

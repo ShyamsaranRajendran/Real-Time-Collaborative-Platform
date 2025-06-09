@@ -10,7 +10,7 @@ import * as Y from 'yjs';
 
 import { EditorToolbar } from './editor-toolbar';
 import { UserPresence } from './user-presence';
-import { initYjsProvider, cleanupYjsProvider, getYjsDoc } from '@/lib/yjs-provider';
+import { initYjsProvider, cleanupYjsProvider, getYjsDoc } from '@/lib/utils/yjs-provider';
 import { useAuth } from '@/components/auth-provider';
 import { useParams } from 'next/navigation';
 import { Card } from '@/components/ui/card';

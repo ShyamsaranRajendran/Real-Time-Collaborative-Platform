@@ -1,111 +1,57 @@
-import type { NextAuthOptions } from "next-auth";
-import GitHubProvider from "next-auth/providers/github";
-import GoogleProvider from "next-auth/providers/google";
-import CredentialsProvider from "next-auth/providers/credentials";
-import { PrismaAdapter } from "@next-auth/prisma-adapter";
-// Update the path below if your prisma file is located elsewhere
-// Update the import below to match your actual Prisma client location
-import { PrismaClient } from "@prisma/client";
-const prisma = new PrismaClient();
-import bcrypt from "bcrypt";
+import prisma from './prisma/client'
+import { PrismaAdapter } from '@next-auth/prisma-adapter'
+import NextAuth from 'next-auth'
+import GitHub from 'next-auth/providers/github'
+import Google from 'next-auth/providers/google'
+import Credentials from 'next-auth/providers/credentials'
+import bcrypt from 'bcrypt'
 
-export const authOptions: NextAuthOptions = {
-  // Database adapter (Prisma example)
+export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
-
-  // Configure authentication providers
   providers: [
-    // GitHub OAuth
-    GitHubProvider({
+    GitHub({
       clientId: process.env.GITHUB_ID!,
-      clientSecret: process.env.GITHUB_SECRET!,
-      // Optional: Customize GitHub scopes
-      authorization: { params: { scope: "read:user" } },
+      clientSecret: process.env.GITHUB_SECRET!
     }),
-
-    // Google OAuth
-    GoogleProvider({
+    Google({
       clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-      // Optional: Customize Google scopes
-      authorization: {
-        params: {
-          prompt: "consent",
-          access_type: "offline",
-          response_type: "code",
-        },
-      },
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!
     }),
-
-    // Email/Password (Credentials)
-    CredentialsProvider({
-      name: "Credentials",
+    Credentials({
       credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" },
+        email: { label: 'Email', type: 'text' },
+        password: { label: 'Password', type: 'password' }
       },
-      async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) {
-          throw new Error("Email and password are required");
-        }
-
+      authorize: async (credentials) => {
+        if (!credentials) return null
         const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
-        });
-
-        if (!user || !user.hashedPassword) {
-          throw new Error("Invalid credentials");
-        }
-
+          where: { email: credentials.email as string }
+        })
+        
+        if (!user) return null
+        
         const isValid = await bcrypt.compare(
-          credentials.password,
-          user.hashedPassword
-        );
-
-        if (!isValid) {
-          throw new Error("Invalid credentials");
-        }
-
-        return user;
-      },
-    }),
+          credentials.password as string,
+          user.hashedPassword!
+        )
+        
+        return isValid ? user : null
+      }
+    })
   ],
-
-  // Session configuration
-  session: {
-    strategy: "jwt", // Recommended for Credentials provider
-    maxAge: 30 * 24 * 60 * 60, // 30 days
-  },
-
-  // Custom pages (override default auth pages)
-  pages: {
-    signIn: "/auth/login",
-    error: "/auth/error",
-  },
-
-  // Callbacks for customizing JWT and session
+  session: { strategy: 'jwt' },
   callbacks: {
-    async jwt({ token, user }) {
+    jwt: ({ token, user }) => {
       if (user) {
-        token.id = user.id;
-        token.role = user.role; // Add custom role if needed
+        token.role = user.role
+        token.id = user.id
       }
-      return token;
+      return token
     },
-    async session({ session, token }) {
-      if (session.user) {
-        session.user.id = token.id;
-        session.user.role = token.role;
-      }
-      return session;
-    },
-    // Redirect after login
-    async redirect({ url, baseUrl }) {
-      return url.startsWith(baseUrl) ? url : `${baseUrl}/dashboard`;
-    },
-  },
-
-  // Security options
-  secret: process.env.NEXTAUTH_SECRET,
-  debug: process.env.NODE_ENV === "development",
-};
+    session: ({ session, token }) => {
+      session.user.role = token.role
+      session.user.id = token.id
+      return session
+    }
+  }
+})
