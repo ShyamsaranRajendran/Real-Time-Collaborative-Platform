@@ -3,8 +3,14 @@
 import * as Y from 'yjs';
 import { WebsocketProvider } from 'y-websocket';
 import { IndexeddbPersistence } from 'y-indexeddb';
+import { Awareness } from 'y-protocols/awareness';
+type UserAwareness = {
+  name: string;
+  color: string;
+  clientId: number;
+  cursor?: { anchor: number; head: number };
+};
 
-// Singleton pattern for the YJS document
 let ydoc: Y.Doc | null = null;
 let wsProvider: WebsocketProvider | null = null;
 let indexeddbProvider: IndexeddbPersistence | null = null;
@@ -26,45 +32,47 @@ export const getYjsDoc = (): Y.Doc => {
 export const initYjsProvider = (options: YjsProviderOptions): {
   doc: Y.Doc;
   provider: WebsocketProvider;
+  awareness: Awareness;
 } => {
   const { documentId, serverUrl, userName = 'Anonymous', userColor = '#ff0000' } = options;
 
-  // Get or initialize the shared document
   const doc = getYjsDoc();
 
-  // Close any existing connection
+  // Cleanup existing connection
   if (wsProvider) {
     wsProvider.disconnect();
+    wsProvider.destroy();
     wsProvider = null;
   }
 
-  // Connect to the WebSocket server
+  // Initialize new WebSocket provider
   wsProvider = new WebsocketProvider(serverUrl, documentId, doc, {
     connect: true,
   });
 
-  // Set initial user state for awareness
-  wsProvider.awareness.setLocalState({
+  // Initialize awareness with proper typing
+  const awareness = wsProvider.awareness;
+  awareness.setLocalStateField('user', {
     name: userName,
     color: userColor,
     clientId: doc.clientID,
-  });
+  } as UserAwareness);
 
-  // Set up offline persistence
+  // Setup offline persistence
   if (typeof window !== 'undefined') {
     indexeddbProvider = new IndexeddbPersistence(documentId, doc);
-    
     indexeddbProvider.on('synced', () => {
-      console.log('Content from IndexedDB loaded');
+      console.log('Content loaded from IndexedDB');
     });
   }
 
-  return { doc, provider: wsProvider };
+  return { doc, provider: wsProvider, awareness };
 };
 
 export const cleanupYjsProvider = () => {
   if (wsProvider) {
     wsProvider.disconnect();
+    wsProvider.destroy();
     wsProvider = null;
   }
   
@@ -74,27 +82,18 @@ export const cleanupYjsProvider = () => {
   }
 
   if (indexeddbProvider) {
-    indexeddbProvider.destroy();
+    indexeddbProvider.clearData();
     indexeddbProvider = null;
   }
 };
 
-export const getAwareness = () => {
-  if (!wsProvider) {
-    throw new Error('WebSocket provider not initialized');
-  }
-  return wsProvider.awareness;
-};
-
 export const updateUserCursor = (anchor: number, head: number) => {
-  if (!wsProvider) {
-    return;
-  }
-  
+  if (!wsProvider) return;
+
   const awareness = wsProvider.awareness;
-  const currentState = awareness.getLocalState() || {};
+  const currentState = awareness.getLocalState() as UserAwareness | null;
   
-  awareness.setLocalState({
+  awareness.setLocalStateField('user', {
     ...currentState,
     cursor: { anchor, head }
   });

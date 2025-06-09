@@ -1,18 +1,18 @@
 "use client";
 
-import { useEffect, useState } from 'react';
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEffect, useState, useCallback } from 'react';
+import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Collaboration from '@tiptap/extension-collaboration';
 import CollaborationCursor from '@tiptap/extension-collaboration-cursor';
 import Placeholder from '@tiptap/extension-placeholder';
+import { EditorContent } from '@tiptap/react';
 import * as Y from 'yjs';
 
 import { EditorToolbar } from './editor-toolbar';
 import { UserPresence } from './user-presence';
-import { initYjsProvider, cleanupYjsProvider, getYjsDoc } from '@/lib/utils/yjs-provider';
+import { initYjsProvider, cleanupYjsProvider } from '@/lib/utils/yjs-provider';
 import { useAuth } from '@/components/auth-provider';
-import { useParams } from 'next/navigation';
 import { Card } from '@/components/ui/card';
 
 interface DocumentEditorProps {
@@ -24,77 +24,12 @@ export function DocumentEditor({ documentId, initialTitle = 'Untitled Document' 
   const [title, setTitle] = useState(initialTitle);
   const [isSaving, setIsSaving] = useState(false);
   const [activeUsers, setActiveUsers] = useState<any[]>([]);
+  const [editor, setEditor] = useState<Editor | null>(null);
   const { user } = useAuth();
   
-  // In a real app, we'd get the websocket URL from an environment variable
   const websocketUrl = 'ws://localhost:3001';
 
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        history: false, // Disable history as it's handled by Yjs
-      }),
-      Placeholder.configure({
-        placeholder: 'Start writing your document...',
-      }),
-      Collaboration.configure({
-        document: getYjsDoc(),
-      }),
-      CollaborationCursor.configure({
-        provider: null, // Will be set after initialization
-        user: {
-          name: user?.name || 'Anonymous',
-          color: getRandomColor(),
-        },
-      }),
-    ],
-    editorProps: {
-      attributes: {
-        class: 'prose prose-sm sm:prose lg:prose-lg xl:prose-xl focus:outline-none max-w-none',
-      },
-    },
-  });
-
-  useEffect(() => {
-    if (!editor || !documentId || !user) return;
-
-    const { provider } = initYjsProvider({
-      documentId,
-      serverUrl: websocketUrl,
-      userName: user.name,
-      userColor: getRandomColor(),
-    });
-
-    // Watch for changes to user presence
-    const awareness = provider.awareness;
-    
-    const updateActiveUsers = () => {
-      const states = awareness.getStates();
-      const users = Array.from(states.entries())
-        .map(([clientId, state]) => ({
-          clientId,
-          name: (state as any)?.user?.name ?? (state as any)?.name,
-          color: (state as any)?.user?.color ?? (state as any)?.color,
-        }))
-        .filter(user => user.name && user.color);
-      
-      setActiveUsers(users);
-    };
-
-    awareness.on('change', updateActiveUsers);
-    
-    // Update editor's collaboration cursor extension
-    // @ts-ignore - The provider property exists but TypeScript doesn't recognize it
-    editor.extensionManager.extensions.find(ext => ext.name === 'collaborationCursor').options.provider = provider;
-
-    // Clean up on unmount
-    return () => {
-      awareness.off('change', updateActiveUsers);
-      cleanupYjsProvider();
-    };
-  }, [editor, documentId, user]);
-
-  function getRandomColor() {
+  const getRandomColor = useCallback(() => {
     const colors = [
       '#f44336', '#e91e63', '#9c27b0', '#673ab7', 
       '#3f51b5', '#2196f3', '#03a9f4', '#00bcd4', 
@@ -102,11 +37,100 @@ export function DocumentEditor({ documentId, initialTitle = 'Untitled Document' 
       '#ffeb3b', '#ffc107', '#ff9800', '#ff5722'
     ];
     return colors[Math.floor(Math.random() * colors.length)];
-  }
+  }, []);
+
+  useEffect(() => {
+    if (!documentId || !user) return;
+
+    let isMounted = true;
+    let editorInstance: Editor | null = null;
+    let provider: any = null;
+    let awareness: any = null;
+
+    const initEditor = async () => {
+      try {
+        const { doc, provider: yProvider, awareness: yAwareness } = initYjsProvider({
+          documentId,
+          serverUrl: websocketUrl,
+          userName: user.name,
+          userColor: getRandomColor(),
+        });
+
+        provider = yProvider;
+        awareness = yAwareness;
+
+        const updateActiveUsers = () => {
+          if (!isMounted) return;
+          const states = awareness.getStates();
+          const users = (Array.from(states.entries()) as [any, any][]).map(
+            ([clientId, state]) => ({
+              clientId,
+              name: (state as any)?.user?.name ?? (state as any)?.name,
+              color: (state as any)?.user?.color ?? (state as any)?.color,
+            })
+          ).filter(user => user.name && user.color);
+          
+          setActiveUsers(users);
+        };
+
+        awareness.on('change', updateActiveUsers);
+        updateActiveUsers(); // Initial update
+
+        editorInstance = new Editor({
+          extensions: [
+            StarterKit.configure({ history: false }),
+            Placeholder.configure({
+              placeholder: 'Start writing your document...',
+            }),
+            Collaboration.configure({ document: doc }),
+            CollaborationCursor.configure({
+              provider: yProvider,
+              user: {
+                name: user?.name || 'Anonymous',
+                color: getRandomColor(),
+              },
+            }),
+          ],
+          editorProps: {
+            attributes: {
+              class: 'prose prose-sm sm:prose lg:prose-lg xl:prose-xl focus:outline-none max-w-none',
+            },
+          },
+        });
+
+        if (isMounted) {
+          setEditor(editorInstance);
+        }
+      } catch (error) {
+        console.error('Error initializing editor:', error);
+      }
+    };
+
+    initEditor();
+
+    return () => {
+      isMounted = false;
+      
+      // Cleanup in the correct order
+      if (awareness) {
+        awareness.off('change');
+      }
+
+      if (editorInstance) {
+        editorInstance.destroy();
+      }
+
+      // Add a small delay to ensure all transactions are complete
+      setTimeout(() => {
+        if (provider) {
+          cleanupYjsProvider();
+        }
+      }, 100);
+    };
+  }, [documentId, user, getRandomColor]);
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setTitle(e.target.value);
-    // In a real app, we'd debounce this and save to the server
   };
 
   if (!editor) {
